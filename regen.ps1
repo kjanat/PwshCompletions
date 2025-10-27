@@ -1,5 +1,84 @@
 #!/usr/bin/env pwsh
 
+<#
+.SYNOPSIS
+    Generates PowerShell completion scripts for various command-line tools.
+
+.DESCRIPTION
+    Regenerates PowerShell tab completion files for installed command-line tools
+    and saves them to the local completions directory. The script automatically
+    detects which tools are available and generates completions only for installed
+    commands.
+
+    Supports both simple command configurations (string) and advanced configurations
+    (hashtable) that allow custom command validation, environment variables, and
+    special handling.
+
+    Generated completion files are saved to $env:LOCALAPPDATA\PwshCompletions and
+    can be loaded automatically in your PowerShell profile.
+
+.PARAMETER Force
+    Regenerates completion files even if they already exist. By default, the script
+    skips commands that already have completion files to avoid unnecessary regeneration.
+
+.EXAMPLE
+    .\regen.ps1
+
+    Generates completion files for all available commands that don't already have
+    completion files.
+
+.EXAMPLE
+    .\regen.ps1 -Force
+
+    Regenerates all completion files, overwriting existing ones.
+
+.EXAMPLE
+    .\regen.ps1 -Verbose
+
+    Generates completions with detailed progress information about each command
+    being processed.
+
+.EXAMPLE
+    .\regen.ps1 -WhatIf
+
+    Shows what completion files would be generated without actually creating them.
+
+.EXAMPLE
+    .\regen.ps1 -Debug
+
+    Generates completions with comprehensive debugging information including
+    configuration parsing, environment variable handling, and command execution.
+
+.EXAMPLE
+    .\regen.ps1 -Force -Verbose
+
+    Regenerates all completion files with detailed progress output.
+
+.NOTES
+    File Name      : regen.ps1
+    Prerequisite   : PowerShell 7.0+
+    Location       : $env:LOCALAPPDATA\PwshCompletions
+
+    The script supports two configuration formats:
+
+    Simple (string):
+        "command-name" = "command --generate-completions"
+
+    Advanced (hashtable):
+        "command-name" = @{
+            check = "base-command"              # Command to verify exists
+            command = "command --completions"   # Command to generate completions
+            env = @{ VAR = "value" }            # Environment variables to set
+            skipCheck = $false                  # Skip command existence check
+        }
+
+.LINK
+    https://github.com/kjanat/PwshCompletions
+
+.OUTPUTS
+    Completion files are written to: $env:LOCALAPPDATA\PwshCompletions\_<command>.ps1
+#>
+
 [CmdletBinding(SupportsShouldProcess=$true)]
 param(
     [switch]$Force
