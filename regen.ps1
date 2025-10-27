@@ -3,7 +3,8 @@ param(
     [switch]$Force
 )
 
-$CompDir = "$env:LOCALAPPDATA/PwshCompletions"
+$CompDir = Join-Path -Path $env:LOCALAPPDATA -ChildPath "PwshCompletions"
+
 if (-not (Test-Path $CompDir)) {
     New-Item -ItemType Directory -Path $CompDir | Out-Null
     Write-Host "Created completions directory: $CompDir" -ForegroundColor Green
@@ -11,9 +12,15 @@ if (-not (Test-Path $CompDir)) {
 
 $commands_completioncmd = @{
     "ast-grep" = "ast-grep completions powershell"
-    "cargo" = "cargo +nightly"  # Requires CARGO_COMPLETE='powershell' env var
+    "cargo" = @{
+        command = "cargo +nightly"
+        env = @{ CARGO_COMPLETE = "powershell" }
+    }
     "gh" = "gh completion -s powershell"
-    "gh-copilot" = "gh copilot alias pwsh"
+    "gh-copilot" = @{
+        check = "gh"
+        command = "gh copilot alias pwsh"
+    }
     "golangci-lint" = "golangci-lint completion powershell"
     "pnpm" = "pnpm completion pwsh"
     "ruff" = "ruff generate-shell-completion powershell"
@@ -32,11 +39,24 @@ $skippedCount = 0
 $failedCount = 0
 
 foreach ($cmd in $commands_completioncmd.Keys) {
-    $completionCmd = $commands_completioncmd[$cmd]
+    $config = $commands_completioncmd[$cmd]
     $outputFile = "${CompDir}/_${cmd}.ps1"
 
+    # Parse config (string or hashtable)
+    if ($config -is [string]) {
+        $checkCommand = $cmd
+        $generateCommand = $config
+        $envVars = @{}
+        $skipCheck = $false
+    } else {
+        $checkCommand = if ($config.check) { $config.check } else { $cmd }
+        $generateCommand = $config.command
+        $envVars = if ($config.env) { $config.env } else { @{} }
+        $skipCheck = if ($null -ne $config.skipCheck) { $config.skipCheck } else { $false }
+    }
+
     # Check if command exists
-    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
+    if (-not $skipCheck -and -not (Get-Command $checkCommand -ErrorAction SilentlyContinue)) {
         Write-Host "  [SKIP] $cmd - command not found" -ForegroundColor Yellow
         $skippedCount++
         continue
@@ -53,18 +73,23 @@ foreach ($cmd in $commands_completioncmd.Keys) {
     try {
         Write-Host "  [GEN]  $cmd..." -ForegroundColor Cyan -NoNewline
 
-        # Special handling for cargo - requires CARGO_COMPLETE env var
-        if ($cmd -eq "cargo") {
-            $prevCargoComplete = $env:CARGO_COMPLETE
-            $env:CARGO_COMPLETE = 'powershell'
-            $completionOutput = Invoke-Expression $completionCmd 2>&1
-            if ($null -eq $prevCargoComplete) {
-                Remove-Item Env:\CARGO_COMPLETE -ErrorAction SilentlyContinue
+        # Save and set environment variables
+        $savedEnvVars = @{}
+        foreach ($key in $envVars.Keys) {
+            $savedEnvVars[$key] = [System.Environment]::GetEnvironmentVariable($key)
+            [System.Environment]::SetEnvironmentVariable($key, $envVars[$key])
+        }
+
+        # Execute generation command
+        $completionOutput = Invoke-Expression $generateCommand 2>&1
+
+        # Restore environment variables
+        foreach ($key in $savedEnvVars.Keys) {
+            if ($null -eq $savedEnvVars[$key]) {
+                Remove-Item "Env:\$key" -ErrorAction SilentlyContinue
             } else {
-                $env:CARGO_COMPLETE = $prevCargoComplete
+                [System.Environment]::SetEnvironmentVariable($key, $savedEnvVars[$key])
             }
-        } else {
-            $completionOutput = Invoke-Expression $completionCmd 2>&1
         }
 
         if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
