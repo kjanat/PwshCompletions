@@ -1,13 +1,20 @@
 #!/usr/bin/env pwsh
+
+[CmdletBinding(SupportsShouldProcess=$true)]
 param(
     [switch]$Force
 )
 
 $CompDir = Join-Path -Path $env:LOCALAPPDATA -ChildPath "PwshCompletions"
 
+Write-Verbose "Completion directory: $CompDir"
+
 if (-not (Test-Path $CompDir)) {
-    New-Item -ItemType Directory -Path $CompDir | Out-Null
-    Write-Host "Created completions directory: $CompDir" -ForegroundColor Green
+    if ($PSCmdlet.ShouldProcess($CompDir, "Create completions directory")) {
+        New-Item -ItemType Directory -Path $CompDir | Out-Null
+        Write-Host "Created completions directory: $CompDir" -ForegroundColor Green
+        Write-Verbose "Successfully created directory"
+    }
 }
 
 $commands_completioncmd = @{
@@ -40,7 +47,9 @@ $failedCount = 0
 
 foreach ($cmd in $commands_completioncmd.Keys) {
     $config = $commands_completioncmd[$cmd]
-    $outputFile = "${CompDir}/_${cmd}.ps1"
+    $outputFile = Join-Path -Path $CompDir -ChildPath "_${cmd}.ps1"
+
+    Write-Debug "Processing command: $cmd"
 
     # Parse config (string or hashtable)
     if ($config -is [string]) {
@@ -48,16 +57,25 @@ foreach ($cmd in $commands_completioncmd.Keys) {
         $generateCommand = $config
         $envVars = @{}
         $skipCheck = $false
+        Write-Debug "  Config type: string"
+        Write-Debug "  Check command: $checkCommand"
+        Write-Debug "  Generate command: $generateCommand"
     } else {
         $checkCommand = if ($config.check) { $config.check } else { $cmd }
         $generateCommand = $config.command
         $envVars = if ($config.env) { $config.env } else { @{} }
         $skipCheck = if ($null -ne $config.skipCheck) { $config.skipCheck } else { $false }
+        Write-Debug "  Config type: hashtable"
+        Write-Debug "  Check command: $checkCommand"
+        Write-Debug "  Generate command: $generateCommand"
+        Write-Debug "  Environment variables: $($envVars.Count)"
+        Write-Debug "  Skip check: $skipCheck"
     }
 
     # Check if command exists
     if (-not $skipCheck -and -not (Get-Command $checkCommand -ErrorAction SilentlyContinue)) {
         Write-Host "  [SKIP] $cmd - command not found" -ForegroundColor Yellow
+        Write-Verbose "Skipping $cmd - command '$checkCommand' not found"
         $skippedCount++
         continue
     }
@@ -65,47 +83,63 @@ foreach ($cmd in $commands_completioncmd.Keys) {
     # Skip if file exists and -Force not specified
     if ((Test-Path $outputFile) -and -not $Force) {
         Write-Host "  [SKIP] $cmd - file exists (use -Force to regenerate)" -ForegroundColor Gray
+        Write-Verbose "Skipping $cmd - file exists at $outputFile"
         $skippedCount++
         continue
     }
 
     # Generate completion
-    try {
-        Write-Host "  [GEN]  $cmd..." -ForegroundColor Cyan -NoNewline
+    if ($PSCmdlet.ShouldProcess($outputFile, "Generate completion for '$cmd'")) {
+        try {
+            Write-Host "  [GEN]  $cmd..." -ForegroundColor Cyan -NoNewline
+            Write-Verbose "Generating completion for $cmd to $outputFile"
 
-        # Save and set environment variables
-        $savedEnvVars = @{}
-        foreach ($key in $envVars.Keys) {
-            $savedEnvVars[$key] = [System.Environment]::GetEnvironmentVariable($key)
-            [System.Environment]::SetEnvironmentVariable($key, $envVars[$key])
-        }
-
-        # Execute generation command
-        $completionOutput = Invoke-Expression $generateCommand 2>&1
-
-        # Restore environment variables
-        foreach ($key in $savedEnvVars.Keys) {
-            if ($null -eq $savedEnvVars[$key]) {
-                Remove-Item "Env:\$key" -ErrorAction SilentlyContinue
-            } else {
-                [System.Environment]::SetEnvironmentVariable($key, $savedEnvVars[$key])
+            # Save and set environment variables
+            $savedEnvVars = @{}
+            foreach ($key in $envVars.Keys) {
+                $savedEnvVars[$key] = [System.Environment]::GetEnvironmentVariable($key)
+                Write-Debug "  Setting env var: $key = $($envVars[$key])"
+                [System.Environment]::SetEnvironmentVariable($key, $envVars[$key])
             }
+
+            # Execute generation command
+            Write-Debug "  Executing: $generateCommand"
+            $completionOutput = Invoke-Expression $generateCommand 2>&1
+
+            # Restore environment variables
+            foreach ($key in $savedEnvVars.Keys) {
+                if ($null -eq $savedEnvVars[$key]) {
+                    Write-Debug "  Removing env var: $key"
+                    Remove-Item "Env:\$key" -ErrorAction SilentlyContinue
+                } else {
+                    Write-Debug "  Restoring env var: $key = $($savedEnvVars[$key])"
+                    [System.Environment]::SetEnvironmentVariable($key, $savedEnvVars[$key])
+                }
+            }
+
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
+                throw "Command exited with code $LASTEXITCODE"
+            }
+
+            # Write with UTF-8 encoding
+            Write-Verbose "Writing completion output to file"
+            $completionOutput | Out-File -FilePath $outputFile -Encoding UTF8 -Force
+
+            Write-Host " OK" -ForegroundColor Green
+            Write-Verbose "Successfully generated completion for $cmd"
+            $successCount++
         }
-
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
-            throw "Command exited with code $LASTEXITCODE"
+        catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "         Error: $_" -ForegroundColor Red
+            Write-Verbose "Failed to generate completion for $cmd : $_"
+            Write-Debug "Exception: $($_.Exception.GetType().FullName)"
+            Write-Debug "Stack trace: $($_.ScriptStackTrace)"
+            $failedCount++
         }
-
-        # Write with UTF-8 encoding
-        $completionOutput | Out-File -FilePath $outputFile -Encoding UTF8 -Force
-
-        Write-Host " OK" -ForegroundColor Green
-        $successCount++
-    }
-    catch {
-        Write-Host " FAILED" -ForegroundColor Red
-        Write-Host "         Error: $_" -ForegroundColor Red
-        $failedCount++
+    } else {
+        Write-Verbose "Skipped $cmd due to -WhatIf"
+        $skippedCount++
     }
 }
 
@@ -116,6 +150,9 @@ Write-Host "  Generated: $successCount" -ForegroundColor Green
 Write-Host "  Skipped:   $skippedCount" -ForegroundColor Yellow
 Write-Host "  Failed:    $failedCount" -ForegroundColor $(if ($failedCount -gt 0) { "Red" } else { "Gray" })
 Write-Host ("=" * 50) -ForegroundColor Gray
+
+Write-Verbose "Total commands processed: $($commands_completioncmd.Count)"
+Write-Verbose "Generation complete - Generated: $successCount, Skipped: $skippedCount, Failed: $failedCount"
 
 if ($successCount -gt 0) {
     Write-Host "`nRestart your PowerShell session to load the new completions." -ForegroundColor Cyan
