@@ -14,8 +14,10 @@
     (hashtable) that allow custom command validation, environment variables, and
     special handling.
 
-    Generated completion files are saved to $env:LOCALAPPDATA\PwshCompletions and
-    can be loaded automatically in your PowerShell profile.
+    Generated completion files are saved to a platform-specific directory and
+    can be loaded automatically in your PowerShell profile:
+    - Windows: $env:LOCALAPPDATA\PwshCompletions
+    - macOS/Linux: ~/.local/share/pwsh/completions
 
 .PARAMETER Force
     Regenerates completion files even if they already exist. By default, the script
@@ -57,7 +59,10 @@
 .NOTES
     File Name      : regen.ps1
     Prerequisite   : PowerShell 7.0+
-    Location       : $env:LOCALAPPDATA\PwshCompletions
+
+    Completion directory locations:
+    - Windows:     $env:LOCALAPPDATA\PwshCompletions
+    - macOS/Linux: ~/.local/share/pwsh/completions
 
     The script supports two configuration formats:
 
@@ -76,7 +81,9 @@
     https://github.com/kjanat/PwshCompletions
 
 .OUTPUTS
-    Completion files are written to: $env:LOCALAPPDATA\PwshCompletions\_<command>.ps1
+    Completion files are written to platform-specific locations:
+    - Windows:     $env:LOCALAPPDATA\PwshCompletions\_<command>.ps1
+    - macOS/Linux: ~/.local/share/pwsh/completions/_<command>.ps1
 #>
 
 [CmdletBinding(SupportsShouldProcess=$true)]
@@ -84,8 +91,19 @@ param(
     [switch]$Force
 )
 
-$CompDir = Join-Path -Path $env:LOCALAPPDATA -ChildPath "PwshCompletions"
+# Determine completion directory based on platform
+if ($IsWindows -or $null -eq $IsWindows) {
+    # Windows or PowerShell < 6.0 (assumes Windows)
+    $CompDir = Join-Path -Path $env:LOCALAPPDATA -ChildPath "PwshCompletions"
+} elseif ($IsMacOS) {
+    # macOS
+    $CompDir = Join-Path -Path $HOME -ChildPath ".local/share/pwsh/completions"
+} else {
+    # Linux and other Unix-like systems
+    $CompDir = Join-Path -Path $HOME -ChildPath ".local/share/pwsh/completions"
+}
 
+Write-Verbose "Platform: $($PSVersionTable.Platform ?? 'Windows (legacy)')"
 Write-Verbose "Completion directory: $CompDir"
 
 if (-not (Test-Path $CompDir)) {
