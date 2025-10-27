@@ -16,7 +16,7 @@
 
     Generated completion files are saved to a platform-specific directory and
     can be loaded automatically in your PowerShell profile:
-    - Windows: $env:LOCALAPPDATA\PwshCompletions
+    - Windows:     $env:LOCALAPPDATA\PwshCompletions
     - macOS/Linux: ~/.local/share/pwsh/completions
 
 .PARAMETER Force
