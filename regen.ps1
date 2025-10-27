@@ -9,19 +9,19 @@ if (-not (Test-Path $CompDir)) {
     Write-Host "Created completions directory: $CompDir" -ForegroundColor Green
 }
 
-# $env:CARGO_COMPLETE='powershell'; cargo +nightly | Out-String | Invoke-Expression
-
 $commands_completioncmd = @{
     "ast-grep" = "ast-grep completions powershell"
+    "cargo" = "cargo +nightly"  # Requires CARGO_COMPLETE='powershell' env var
     "gh" = "gh completion -s powershell"
     "gh-copilot" = "gh copilot alias pwsh"
     "golangci-lint" = "golangci-lint completion powershell"
     "pnpm" = "pnpm completion pwsh"
     "ruff" = "ruff generate-shell-completion powershell"
+    "rustup" = "rustup completions powershell"
+    "ty" = "ty generate-shell-completion powershell"
     "uv" = "uv generate-shell-completion powershell"
     "uvx" = "uvx --generate-shell-completion powershell"
-    "volta" = "volta completions powershell",
-    "rustup" = "rustup completions powershell"
+    "volta" = "volta completions powershell"
 }
 
 Write-Host "`nRegenerating PowerShell completions..." -ForegroundColor Cyan
@@ -53,7 +53,19 @@ foreach ($cmd in $commands_completioncmd.Keys) {
     try {
         Write-Host "  [GEN]  $cmd..." -ForegroundColor Cyan -NoNewline
 
-        $completionOutput = Invoke-Expression $completionCmd 2>&1
+        # Special handling for cargo - requires CARGO_COMPLETE env var
+        if ($cmd -eq "cargo") {
+            $prevCargoComplete = $env:CARGO_COMPLETE
+            $env:CARGO_COMPLETE = 'powershell'
+            $completionOutput = Invoke-Expression $completionCmd 2>&1
+            if ($null -eq $prevCargoComplete) {
+                Remove-Item Env:\CARGO_COMPLETE -ErrorAction SilentlyContinue
+            } else {
+                $env:CARGO_COMPLETE = $prevCargoComplete
+            }
+        } else {
+            $completionOutput = Invoke-Expression $completionCmd 2>&1
+        }
 
         if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
             throw "Command exited with code $LASTEXITCODE"
